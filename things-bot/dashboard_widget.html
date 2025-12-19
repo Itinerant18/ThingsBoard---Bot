@@ -1,0 +1,43 @@
+<!-- 
+  ThingsBoard Static HTML Widget Code 
+  Copy and paste the section relevant to your chatbot platform into the "HTML" tab of a Static HTML widget.
+-->
+
+<!-- OPTION 1: BOTPRESS WEBCHAT -->
+<!-- 
+  Replace 'https://your-botpress-server.com' and 'YOUR_BOT_ID_HERE' with your actual values.
+-->
+<div
+  id="botpress-webchat"
+  style="position: fixed; bottom: 20px; right: 20px; z-index: 9999"
+></div>
+<script src="https://cdn.botpress.cloud/webchat/v3.3/inject.js"></script>
+<script>
+  window.botpress.init({
+    host: "https://your-botpress-server.com",
+    botId: "YOUR_BOT_ID_HERE",
+  });
+  // Optional: Automatically open on load
+  // window.botpress.on('webchat:initialized', () => { window.botpress.open(); });
+</script>
+
+<!-- OPTION 2: DIALOGFLOW MESSENGER -->
+<!-- 
+  Replace 'YOUR_DIALOGFLOW_AGENT_ID' and 'YOUR_GCP_PROJECT_ID' with your actual values.
+-->
+<!--
+<script src="https://www.gstatic.com/dialogflow-console/fast/messenger/bootstrap.js?v=1"></script>
+<df-messenger
+  intent="WELCOME"
+  chat-title="Device Assistant"
+  agent-id="YOUR_DIALOGFLOW_AGENT_ID"
+  language-code="en"
+></df-messenger>
+-->
+
+<!-- 
+  OPTION 3: CUSTOM IFRAME (If hosting your chat UI externally)
+-->
+<!--
+<iframe src="http://localhost:5000/static/chat.html" style="width: 350px; height: 500px; border: none; position: fixed; bottom: 20px; right: 20px; z-index: 9999;"></iframe>
+-->
