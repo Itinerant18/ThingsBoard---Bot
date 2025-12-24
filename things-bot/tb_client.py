@@ -7,44 +7,51 @@ class ThingsBoardClient:
         self.base_url = base_url.rstrip('/')
         self.username = username
         self.password = password
-        # If the 'password' looks like a long JWT token, treat it as a token directly
-        if len(password) > 50: 
+        self.token = None
+        self.token_expiry = 0
+        
+        # Check if the provided 'password' is actually a Bearer Token (very long string)
+        if len(password) > 150: 
+            print("[TB] Detected static JWT token in configuration.")
             self.token = password
-            self.token_expiry = 9999999999 # Treat as valid indefinitely (user managed)
+            self.token_expiry = time.time() + (24 * 3600) * 365 # Assume valid for a year if static
+            self.is_static_token = True
         else:
-            self.token = None
-            self.token_expiry = 0
+            print("[TB] Detected password. Will perform auto-login to fetch token.")
+            self.is_static_token = False
 
     def login(self):
-        """Authenticates with ThingsBoard and stores the JWT token."""
-        # If we already have a long token (static), skip login
-        if self.token and self.token_expiry > time.time():
+        """Authenticates with ThingsBoard and gets a fresh JWT token."""
+        if self.is_static_token:
             return True
 
         url = f"{self.base_url}/api/auth/login"
-        payload = {
-            "username": self.username,
-            "password": self.password
-        }
+        payload = {"username": self.username, "password": self.password}
+        
+        print(f"[TB] Logging in to {self.base_url} as {self.username}...")
         try:
             response = requests.post(url, json=payload)
             response.raise_for_status()
             data = response.json()
             self.token = data.get("token")
-            # Calculate approx expiry
-            self.token_expiry = time.time() + (2 * 3600) 
+            # Set expiry (default TB token is 2.5 hours, refresh safely after 2 hours)
+            self.token_expiry = time.time() + 7200 
+            print(f"[TB] Login Successful! Token acquired (Starts with: {self.token[:10]}...)")
             return True
         except Exception as e:
-            print(f"Error logging in: {e}")
+            print(f"[TB] Login Failed: {e}")
+            if hasattr(e, 'response') and e.response is not None:
+                print(f"[TB] Server Response: {e.response.text}")
             return False
 
     def get_header(self):
-        """Returns the auth header, refreshing token if necessary."""
-        if not self.token or time.time() > self.token_expiry:
-            success = self.login()
-            if not success:
-                # If login simple failed but we have a static token, maybe it expired?
-                raise Exception("Failed to authenticate with ThingsBoard")
+        """Returns the auth header, ensuring token is valid."""
+        # Refresh if we have no token OR it's expired/about to expire (within 5 mins)
+        if not self.token or (not self.is_static_token and time.time() > self.token_expiry - 300):
+            print("[TB] Token expired or missing. Refreshing...")
+            if not self.login():
+                raise Exception("Unable to authenticate with ThingsBoard API.")
+                
         return {"X-Authorization": f"Bearer {self.token}"}
 
     def get_attributes(self, device_id, scope='SERVER_SCOPE', keys=None):

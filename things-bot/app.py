@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify, render_template
 from tb_client import ThingsBoardClient
 import os
 import json
+import time  # <--- Added this
 from dotenv import load_dotenv
 from openai import OpenAI
 from flask_cors import CORS
@@ -74,6 +75,7 @@ def prepare_context_data(attributes, telemetry):
             # Store metadata for AI to know how fresh data is
             context[f"{key}_updated_at"] = time_str
             
+    print(f"\n[DEBUG] Data Available for AI: {list(context.keys())}\n")
     return context
 
 @app.route('/')
@@ -108,22 +110,20 @@ def check_alerts():
         
         # Check active alarms
         alarms_data = telemetry.get('alarmCount', [{'value': 0}])
-        if alarms_data:
-             alarms = alarms_data[0]['value']
-             if int(alarms) > 0:
-                alerts.append(f"Warning: {alarms} active alarms detected!")
+        if alarms_data and len(alarms_data) > 0:
+             val = alarms_data[0].get('value')
+             if val is not None and int(val) > 0:
+                alerts.append(f"Warning: {val} active alarms detected!")
             
         # Check Battery
         batt_data = telemetry.get('battery_status', [{'value': 0}])
-        if batt_data:
-            batt = batt_data[0]['value']
-            # battery_status might be a JSON string sometimes? Handled by clean_json_string elsewhere but here we want raw check
-            # logic usually expects number. If it is string "14.0", int conversion might be needed or handled in get_telemetry
-            # For safety, let's just skipp complex logic here and rely on AI for Q&A mostly
-            try:
-                if float(batt) < 20: 
-                    alerts.append(f"Critical: Battery is low ({batt}%)")
-            except: pass
+        if batt_data and len(batt_data) > 0:
+            batt = batt_data[0].get('value')
+            if batt is not None:
+                try:
+                    if float(batt) < 20: 
+                        alerts.append(f"Critical: Battery is low ({batt}%)")
+                except: pass
             
         if alerts:
             return jsonify({"has_alert": True, "message": " | ".join(alerts)})
@@ -136,96 +136,89 @@ def check_alerts():
 
 @app.route('/ask', methods=['POST'])
 def ask_device_data():
-    """
-    Endpoint to process natural language queries about the specific device using OpenAI.
-    """
-    data = request.json
-    question = data.get('question', '').lower()
-    
-    if not question:
-        return jsonify({"error": "No question provided"}), 400
-    
-    # 1. Dynamic Data Discovery
-    # Fetch ALL available keys dynamically
-    ts_keys = tb_client.get_keys(DEVICE_ID, 'timeseries')
-    
-    # Fetch Attributes (No keys needed to get all usually, but for safety lets try explicit scopes)
-    attr_client = tb_client.get_attributes(DEVICE_ID, keys=None, scope='CLIENT_SCOPE')
-    attr_server = tb_client.get_attributes(DEVICE_ID, keys=None, scope='SERVER_SCOPE')
-    attr_shared = tb_client.get_attributes(DEVICE_ID, keys=None, scope='SHARED_SCOPE')
-    attributes = attr_client + attr_server + attr_shared
-    
-    # Fetch Telemetry (All detected keys)
-    # If list is huge, we might truncate, but for single device usually < 50 keys
-    telemetry = tb_client.get_telemetry(DEVICE_ID, keys=ts_keys)
-    
-    # 2. Prepare Context
-    context_data = prepare_context_data(attributes, telemetry)
-    
-    # 3. Check for Chart Intent
-    chart_data = None
-    chart_key = None
-    if any(k in question for k in ['chart', 'graph', 'trend', 'history', 'plot']):
-        try:
-            # Ask AI which key to plot from the available keys
-            valid_keys = ", ".join(ts_keys)
-            prompt = f"User asked: '{question}'. Available keys: [{valid_keys}]. Identify the single most relevant telemetry key to plot. Return ONLY the key name. If none match, return 'None'."
-            
-            key_resp = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": prompt}]
-            )
-            extracted_key = key_resp.choices[0].message.content.strip()
-            
-            if extracted_key in ts_keys:
-                chart_key = extracted_key
-                # Fetch last 24h history
-                end_ts = time.time()
-                start_ts = end_ts - (24 * 3600)
-                history = tb_client.get_history(DEVICE_ID, [extracted_key], start_ts, end_ts)
-                
-                # Format for frontend
-                if extracted_key in history:
-                    chart_data = {
-                        "label": extracted_key,
-                        "points": [{"t": p['ts'], "y": p['value']} for p in history[extracted_key]]
-                    }
-        except Exception as e:
-            print(f"Chart extraction error: {e}")
-
-    # 4. Generate Answer with OpenAI
     try:
-        system_prompt = (
-            "You are an intelligent and friendly IoT Device Assistant. "
-            "You have access to the COMPLETE real-time state of the device in JSON format, including timestamps for when data was last updated. "
-            
-            "**Your Instructions:**\n"
-            "1. **Be User-Friendly**: Translate technical keys into normal English (e.g., 'ac_status' -> 'AC Power Status', 'batt' -> 'Battery').\n"
-            "2. **Summarize**: If the answer involves a large JSON object (like camera lists or configs), do NOT dump the raw JSON. Summarize it (e.g., 'There are 3 cameras online: Cam1, Cam2...').\n"
-            "3. **Check Timestamps**: If asked about status, mention if the data looks old or stale based on the '_updated_at' fields provided.\n"
-            "4. **Format**: Use Markdown (bolding, lists) to make the response easy to read.\n"
-            "5. **Context**: Use the provided context data effectively. If the answer is not in the data, frankly admit it."
-        )
-        if chart_key:
-            system_prompt += f"\n\n[NOTE]: A line chart for '{chart_key}' has been generated and shown to the user. You should mention: 'I've plotted the trend for {chart_key} below.'"
+        data = request.json
+        question = data.get('question', '').lower()
+        
+        if not question:
+            return jsonify({"error": "No question provided"}), 400
+        
+        # 1. Dynamic Data Discovery
+        ts_keys = tb_client.get_keys(DEVICE_ID, 'timeseries')
+        
+        # Fetch Attributes
+        attr_client = tb_client.get_attributes(DEVICE_ID, keys=None, scope='CLIENT_SCOPE')
+        attr_server = tb_client.get_attributes(DEVICE_ID, keys=None, scope='SERVER_SCOPE')
+        attr_shared = tb_client.get_attributes(DEVICE_ID, keys=None, scope='SHARED_SCOPE')
+        attributes = attr_client + attr_server + attr_shared
+        
+        # Fetch Telemetry
+        telemetry = tb_client.get_telemetry(DEVICE_ID, keys=ts_keys)
+        
+        # 2. Prepare Context
+        context_data = prepare_context_data(attributes, telemetry)
+        
+        # 3. Check for Chart Intent
+        chart_data = None
+        chart_key = None
+        if any(k in question for k in ['chart', 'graph', 'trend', 'history', 'plot']):
+            try:
+                valid_keys = ", ".join(ts_keys) if ts_keys else "None"
+                prompt = f"User asked: '{question}'. Available keys: [{valid_keys}]. Identify the single most relevant telemetry key to plot. Return ONLY the key name. If none match, return 'None'."
+                
+                key_resp = client.chat.completions.create(
+                    model="gpt-3.5-turbo",
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                extracted_key = key_resp.choices[0].message.content.strip()
+                
+                if ts_keys and extracted_key in ts_keys:
+                    chart_key = extracted_key
+                    end_ts = time.time()
+                    start_ts = end_ts - (24 * 3600)
+                    history = tb_client.get_history(DEVICE_ID, [extracted_key], start_ts, end_ts)
+                    
+                    if extracted_key in history:
+                        chart_data = {
+                            "label": extracted_key,
+                            "points": [{"t": p['ts'], "y": p['value']} for p in history[extracted_key]]
+                        }
+            except Exception as e:
+                print(f"Chart extraction error: {e}")
 
-        completion = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": f"Device Context: {json.dumps(context_data)}\n\nUser Question: {question}"}
-            ]
-        )
-        answer = completion.choices[0].message.content
+        # 4. Generate Answer with OpenAI
+        try:
+            system_prompt = (
+                "You are an intelligent and friendly IoT Device Assistant. "
+                "You have access to the COMPLETE real-time state of the device in JSON format. "
+                "Answer the user's question based strictly on this data."
+            )
+            if chart_key:
+                system_prompt += f"\n\n[NOTE]: A line chart for '{chart_key}' has been generated."
+
+            completion = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": f"Device Context: {json.dumps(context_data)}\n\nUser Question: {question}"}
+                ]
+            )
+            answer = completion.choices[0].message.content
+        except Exception as e:
+            print(f"OpenAI Error: {e}")
+            answer = f"I'm sorry, I encountered an error with the AI model: {str(e)}"
+
+        return jsonify({
+            "response": answer,
+            "data_used": context_data,
+            "chart": chart_data
+        })
+
     except Exception as e:
-        print(f"OpenAI Error: {e}")
-        answer = "I'm sorry, I encountered an error generating the response from the AI model."
-
-    return jsonify({
-        "response": answer,
-        "data_used": context_data,
-        "chart": chart_data
-    })
+        print(f"Server Error in /ask: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
