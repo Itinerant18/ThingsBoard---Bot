@@ -309,9 +309,4 @@ If you like this project — ⭐ **star it, fork it, and build on it.**
 
 Happy building 🚀
 
-```
 
-### Next Step
-Since you are currently stuck on a `git push` error, you can save this content to your `README.md` file now, but remember you must resolve the git conflict (using **Option 1: Pull** or **Option 2: Force Push** from my previous message) before you can successfully upload this new README to GitHub.
-
-```
