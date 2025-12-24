@@ -1,5 +1,5 @@
 
-# 🤖 ThingsBoard AI Assistant
+#  ThingsBoard AI Assistant
 ### Conversational Intelligence for IoT Dashboards
 
 <p align="center">
@@ -9,7 +9,7 @@
 
 ---
 
-## 🌌 What is ThingsBoard AI Assistant?
+##  What is ThingsBoard AI Assistant?
 
 **ThingsBoard AI Assistant** is an AI-powered conversational layer designed to sit directly inside a ThingsBoard dashboard.
 
